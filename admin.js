@@ -6,6 +6,12 @@ async function api(path,options={}){
 }
 function showDashboard(){ $("loginCard").classList.add("hidden");$("dashboard").classList.remove("hidden");loadProducts();}
 function showLogin(){ $("dashboard").classList.add("hidden");$("loginCard").classList.remove("hidden");}
+$("showSetup").onclick=()=>{$("setupCard").classList.toggle("hidden");};
+$("setupForm").onsubmit=async e=>{
+ e.preventDefault();const f=new FormData(e.currentTarget);$("setupMessage").textContent="Admin account बनाया जा रहा है…";
+ try{const response=await fetch(API_BASE+"/api/admin/setup",{method:"POST",headers:{"Content-Type":"application/json","X-Admin-Setup-Token":f.get("setup_token")},body:JSON.stringify({email:f.get("email"),password:f.get("password")})});const d=await response.json();if(!response.ok||!d.success)throw new Error(d.message||"Setup failed");$("setupMessage").textContent="Admin account बन गया। अब Login करें।";$("setupCard").classList.add("hidden");}
+ catch(err){$("setupMessage").textContent=err.message;}
+};
 $("loginForm").onsubmit=async e=>{e.preventDefault();$("loginMessage").textContent="Logging in…";const f=new FormData(e.currentTarget);try{const d=await api("/api/admin/login",{method:"POST",body:JSON.stringify({email:f.get("email"),password:f.get("password")})});token=d.token;sessionStorage.setItem("sycd-admin-token",token);showDashboard();}catch(err){$("loginMessage").textContent=err.message;}};
 async function loadProducts(){try{const d=await api("/api/admin/products");items=d.products||[];renderTable();}catch(e){$("productsTable").textContent=e.message;if(e.message.includes("Unauthorized"))logout();}}
 function renderTable(){if(!items.length){$("productsTable").textContent="अभी कोई Product नहीं है। ऊपर से पहला Product जोड़ें।";return;}
