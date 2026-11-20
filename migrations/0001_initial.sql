@@ -9,4 +9,5 @@ CREATE TABLE IF NOT EXISTS store_settings (setting_key TEXT PRIMARY KEY, setting
 CREATE INDEX IF NOT EXISTS idx_products_catalog ON products(is_available,stock_quantity,category_id);
 CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status,created_at DESC);
-INSERT OR IGNORE INTO store_settings(setting_key,setting_value) VALUES ('store_name','SY Cold Drinks'),('phone','9534891621'),('address','Hariprasad Petrol Pump के पास, जंदाहा, वैशाली, बिहार'),('delivery_charge','20'),('minimum_order','100'),('delivery_radius_km','5'),('business_hours','सुबह 6 से रात 9 बजे'),('is_accepting_orders','true');
+INSERT OR IGNORE INTO store_settings(setting_key,setting_value) VALUES ('store_name','SY Market'),('phone','9534891621'),('address','Hariprasad Petrol Pump के पास, जंदाहा, वैशाली, बिहार'),('delivery_charge','20'),('minimum_order','100'),('delivery_radius_km','5'),('business_hours','सुबह 6 से रात 9 बजे'),('is_accepting_orders','true');
+
