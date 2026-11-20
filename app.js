@@ -1,4 +1,4 @@
-const API_BASE = "https://sy-cold-drinks-a.shivam65838.workers.dev";
+const API_BASE = "https://sy-cold-drink.shivam65838.workers.dev";
 const rupees = n => "₹" + Number(n || 0).toLocaleString("en-IN");
 let products = [], categories = [], activeCategory = "all";
 let cart = JSON.parse(localStorage.getItem("sycd-cart") || "[]");
