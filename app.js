@@ -32,6 +32,7 @@ function addToCart(id){
   if(line){if(line.qty>=Number(p.stock_quantity))return alert("इतना Stock उपलब्ध नहीं है।");line.qty++;}
   else cart.push({id:p.id,name:p.name,price:Number(p.selling_price),size:p.size_label||"",qty:1});
   saveCart();
+  toggleCart(true);
 }
 function renderCart(){
   const count=cart.reduce((s,x)=>s+x.qty,0), subtotal=cart.reduce((s,x)=>s+x.price*x.qty,0);
@@ -67,10 +68,12 @@ $("checkoutForm").onsubmit=async e=>{
   const fd=new FormData(e.currentTarget), payload=Object.fromEntries(fd.entries());
   payload.items=cart.map(x=>({product_id:x.id,quantity:x.qty}));payload.payment_method="cod";
   try{
-    const result=await api("/api/orders",{method:"POST",body:JSON.stringify(payload)});
+    const requestToken=crypto.randomUUID();
+    const result=await api("/api/orders",{method:"POST",headers:{"Idempotency-Key":requestToken},body:JSON.stringify(payload)});
     message.textContent="ऑर्डर सफल! Order No: "+(result.order_number||result.order?.order_number||"Confirmed");
     cart=[];saveCart();e.currentTarget.reset();
   }catch(err){message.textContent="ऑर्डर अभी ऑनलाइन जमा नहीं हो सका: "+err.message+"। कृपया दुकान पर फोन करें।";console.error(err);}
 };
 $("year").textContent=new Date().getFullYear();
 renderCart();loadStore();loadCatalog();
+
