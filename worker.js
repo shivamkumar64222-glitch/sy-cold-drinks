@@ -156,7 +156,12 @@ export default {
     if(type==="delivery"&&subtotal<min)return fail("Minimum home delivery order is ₹"+min);
     if(type==="delivery"&&!address)return fail("Delivery address required");
     const total=subtotal+fee,orderNumber="SY"+Date.now().toString().slice(-9);
-    const customer=await env.DB.prepare("INSERT INTO customers(name,phone) VALUES(?,?) ON CONFLICT(phone) DO UPDATE SET name=excluded.name RETURNING id").bind(name,phone).first();
+    let customer=await env.DB.prepare("SELECT id FROM customers WHERE phone=? ORDER BY id LIMIT 1").bind(phone).first();
+    if(customer) await env.DB.prepare("UPDATE customers SET name=? WHERE id=?").bind(name,customer.id).run();
+    else {
+     const created=await env.DB.prepare("INSERT INTO customers(name,phone) VALUES(?,?)").bind(name,phone).run();
+     customer={id:created.meta.last_row_id};
+    }
     const result=await env.DB.prepare("INSERT INTO orders(order_number,customer_id,customer_name,customer_phone,order_type,payment_method,status,subtotal,delivery_fee,total_amount,address,landmark,notes) VALUES(?,?,?,?,?,'cod','pending',?,?,?,?,?,?)")
       .bind(orderNumber,customer.id,name,phone,type,subtotal,fee,total,address||null,b.landmark||null,b.notes||null).run();
     const orderId=result.meta.last_row_id;
