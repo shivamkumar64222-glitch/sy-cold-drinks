@@ -64,14 +64,14 @@ $("checkoutBtn").onclick=()=>{
 $("closeCheckout").onclick=()=>$("checkoutDialog").close();
 $("orderType").onchange=()=>{$("addressField").classList.toggle("hidden",$("orderType").value==="pickup");renderCart();};
 $("checkoutForm").onsubmit=async e=>{
-  e.preventDefault();const message=$("checkoutMessage");message.textContent="ऑर्डर भेजा जा रहा है…";
-  const fd=new FormData(e.currentTarget), payload=Object.fromEntries(fd.entries());
+  e.preventDefault();const form=e.currentTarget,message=$("checkoutMessage");message.textContent="ऑर्डर भेजा जा रहा है…";
+  const fd=new FormData(form), payload=Object.fromEntries(fd.entries());
   payload.items=cart.map(x=>({product_id:x.id,quantity:x.qty}));payload.payment_method="cod";
   try{
     const requestToken=crypto.randomUUID();
     const result=await api("/api/orders",{method:"POST",headers:{"Idempotency-Key":requestToken},body:JSON.stringify(payload)});
     message.textContent="ऑर्डर सफल! Order No: "+(result.order_number||result.order?.order_number||"Confirmed");
-    cart=[];saveCart();e.currentTarget.reset();
+    cart=[];saveCart();form.reset();
   }catch(err){message.textContent="ऑर्डर अभी ऑनलाइन जमा नहीं हो सका: "+err.message+"। कृपया दुकान पर फोन करें।";console.error(err);}
 };
 $("year").textContent=new Date().getFullYear();
