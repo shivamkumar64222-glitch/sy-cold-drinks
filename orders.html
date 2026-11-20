@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="hi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#071a35">
+  <meta name="description" content="SY Cold Drinks पर आपके पिछले ऑर्डर">
+  <title>मेरे Orders | SY Cold Drinks</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="admin-body">
+  <div class="topline">📦 आपके पिछले ऑर्डर और उनकी स्थिति</div>
+  <header class="site-header">
+    <a class="brand" href="./"><span class="brand-mark">SY</span><span><b>SY Cold Drinks</b><small>CHILL • SIP • REPEAT</small></span></a>
+    <nav><a href="./#products">Products</a><a href="admin.html">Admin</a></nav>
+    <a class="orders-link" href="./#products">🛍️ खरीदारी</a>
+  </header>
+  <main class="section-wrap orders-page">
+    <span class="eyebrow">YOUR ORDERS</span>
+    <h1>मेरे Orders</h1>
+    <p class="orders-intro">इस ब्राउज़र से किए गए ऑर्डर और हर Product की जानकारी यहाँ दिखेगी।</p>
+    <div id="ordersMessage" class="order-empty" role="status" aria-live="polite">आपके Orders लोड हो रहे हैं…</div>
+    <div id="ordersList" class="orders-list"></div>
+    <p class="orders-page-footer"><a href="./#products">← खरीदारी जारी रखें</a></p>
+  </main>
+  <footer><a class="brand footer-brand" href="./"><span class="brand-mark">SY</span><b>SY Cold Drinks</b></a><span>© SY Cold Drinks</span><a href="./#products">Products</a></footer>
+  <script src="orders.js"></script>
+</body>
+</html>
+
