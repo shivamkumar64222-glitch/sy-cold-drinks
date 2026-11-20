@@ -4,7 +4,7 @@ async function api(path,options={}){
  const r=await fetch(API_BASE+path,{...options,headers:{"Content-Type":"application/json",...(token?{Authorization:"Bearer "+token}:{}),...(options.headers||{})}});
  const d=await r.json().catch(()=>({success:false,message:"Invalid API response"}));if(!r.ok||d.success===false)throw new Error(d.message||"Request failed");return d;
 }
-function showDashboard(){ $("loginCard").classList.add("hidden");$("dashboard").classList.remove("hidden");loadProducts();}
+function showDashboard(){ $("loginCard").classList.add("hidden");$("dashboard").classList.remove("hidden");loadProducts();loadCategories();loadOrders();loadSettings();}
 function showLogin(){ $("dashboard").classList.add("hidden");$("loginCard").classList.remove("hidden");}
 $("showSetup").onclick=()=>{$("setupCard").classList.toggle("hidden");};
 $("setupForm").onsubmit=async e=>{
@@ -27,6 +27,13 @@ $("productsTable").addEventListener("click",async e=>{const edit=e.target.closes
  if(del&&confirm("क्या इस Product को हटाना चाहते हैं?")){try{await api("/api/admin/products/"+del.dataset.delete,{method:"DELETE"});await loadProducts();}catch(err){alert(err.message);}}
 });
 $("cancelEdit").onclick=resetForm;$("refreshBtn").onclick=loadProducts;
+let categoryItems=[];
+async function loadCategories(){try{const d=await api("/api/admin/categories");categoryItems=d.categories||[];$("categoriesTable").innerHTML=categoryItems.length?'<table class="admin-table"><tr><th>Name</th><th>Order</th><th>Status</th></tr>'+categoryItems.map(c=>`<tr><td>${esc(c.name)}</td><td>${c.sort_order}</td><td>${Number(c.is_active)?"Active":"Hidden"}</td></tr>`).join("")+"</table>":"No categories yet.";}catch(e){$("categoriesTable").textContent=e.message;}}
+$("categoryForm").onsubmit=async e=>{e.preventDefault();const form=e.currentTarget,b=Object.fromEntries(new FormData(e.currentTarget));b.sort_order=Number(b.sort_order)||0;try{await api("/api/admin/categories",{method:"POST",body:JSON.stringify(b)});form.reset();await loadCategories();}catch(err){alert(err.message);}};
+async function loadOrders(){try{const status=$("orderFilter").value,d=await api("/api/admin/orders"+(status?"?status="+encodeURIComponent(status):""));const orders=d.orders||[];$("ordersTable").innerHTML=orders.length?'<table class="admin-table"><tr><th>Order</th><th>Customer</th><th>Total</th><th>Status</th></tr>'+orders.map(o=>`<tr><td><b>${esc(o.order_number)}</b><br><small>${esc(o.created_at)}</small></td><td>${esc(o.customer_name)}<br>${esc(o.customer_phone)}</td><td>₹${o.total_amount}</td><td><select data-order="${o.id}">${["pending","confirmed","preparing","out_for_delivery","ready_for_pickup","completed","cancelled"].map(s=>`<option ${o.status===s?"selected":""}>${s}</option>`).join("")}</select></td></tr>`).join("")+"</table>":"No orders found.";}catch(e){$("ordersTable").textContent=e.message;}}
+$("orderFilter").onchange=loadOrders;$("ordersTable").addEventListener("change",async e=>{const s=e.target.closest("[data-order]");if(!s)return;try{await api("/api/admin/orders/"+s.dataset.order,{method:"PATCH",body:JSON.stringify({status:s.value})});}catch(err){alert(err.message);loadOrders();}});
+async function loadSettings(){try{const d=await api("/api/admin/settings");for(const [k,v] of Object.entries(d.settings||{})){const i=$("settingsForm").elements.namedItem(k);if(i)i.value=v;}}catch(e){$("settingsMessage").textContent=e.message;}}
+$("settingsForm").onsubmit=async e=>{e.preventDefault();try{await api("/api/admin/settings",{method:"PATCH",body:JSON.stringify(Object.fromEntries(new FormData(e.currentTarget)))});$("settingsMessage").textContent="Settings saved.";}catch(err){$("settingsMessage").textContent=err.message;}};
 async function logout(){if(token){try{await api("/api/admin/logout",{method:"POST"});}catch(e){}}token="";sessionStorage.removeItem("sycd-admin-token");showLogin();}
 $("logoutBtn").onclick=logout;
 if(token){api("/api/admin/me").then(showDashboard).catch(logout);}else showLogin();
