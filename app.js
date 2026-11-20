@@ -1,6 +1,7 @@
 const API_BASE = "https://sy-cold-drink.shivam65838.workers.dev";
 const rupees = n => "₹" + Number(n || 0).toLocaleString("en-IN");
 let products = [], categories = [], activeCategory = "all";
+const categoryIcons = [[/drink|beverage|cold|juice|पेय|ड्रिंक/i,"🥤"],[/grocery|kirana|किराना/i,"🛒"],[/snack|chips|नाश्ता|चिप्स/i,"🍿"],[/dairy|milk|दूध|डेयरी/i,"🥛"],[/fruit|vegetable|सब्ज़ी|सब्जी|फल/i,"🥦"],[/bakery|bread|बेकरी|ब्रेड/i,"🍞"],[/personal|beauty|care|पर्सनल/i,"🧴"],[/home|clean|घर|सफाई/i,"🧹"]];
 let cart = JSON.parse(localStorage.getItem("sycd-cart") || "[]");
 const $ = id => document.getElementById(id);
 const saveCart = () => { localStorage.setItem("sycd-cart", JSON.stringify(cart)); renderCart(); };
@@ -21,10 +22,12 @@ async function api(path, options={}) {
 function renderProducts() {
   const query = ($("searchInput").value || "").trim().toLowerCase();
   const filtered = products.filter(p => (activeCategory==="all" || String(p.category_id)===activeCategory) && [p.name,p.brand,p.description].join(" ").toLowerCase().includes(query));
+  const sort = $("sortProducts").value;
+  filtered.sort((a,b)=>sort==="price-low"?Number(a.selling_price)-Number(b.selling_price):sort==="price-high"?Number(b.selling_price)-Number(a.selling_price):String(a.name).localeCompare(String(b.name),"hi"));
   $("productGrid").innerHTML = filtered.length ? filtered.map(p => `
     <article class="product-card">
-      <div class="product-image">${p.image_url ? `<img src="${escapeAttr(p.image_url)}" alt="${escapeAttr(p.name)}" loading="lazy" onerror="this.style.display='none'">` : '<span class="product-placeholder">🥤</span>'}</div>
-      <div class="product-info"><h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(p.size_label || p.brand || "Chilled Refreshment")}</p>
+      <div class="product-image">${p.image_url ? `<img src="${escapeAttr(p.image_url)}" alt="${escapeAttr(p.name)}" loading="lazy" onerror="this.style.display='none'">` : '<span class="product-placeholder">🛍️</span>'}</div>
+      <div class="product-info"><span class="product-category">${escapeHtml(categories.find(c=>Number(c.id)===Number(p.category_id))?.name||"SY Market")}</span><h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(p.size_label || p.brand || "Everyday essential")}</p>
       <div class="price-line"><b>${rupees(p.selling_price)}</b>${Number(p.mrp)>Number(p.selling_price)?`<del>${rupees(p.mrp)}</del>`:""}</div>
       <button class="add-btn" data-add="${p.id}" ${Number(p.stock_quantity)<=0?"disabled":""}>${Number(p.stock_quantity)<=0?"Out of stock":"＋ Cart में जोड़ें"}</button></div>
     </article>`).join("") : '<div class="empty-products">अभी Products उपलब्ध नहीं हैं। जल्द ही नई सूची आएगी।</div>';
@@ -33,7 +36,13 @@ function escapeHtml(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;",
 function escapeAttr(v){return escapeHtml(v);}
 function renderCategories(){
   $("categories").innerHTML = '<button class="category active" data-category="all">सभी</button>' + categories.map(c=>`<button class="category" data-category="${c.id}">${escapeHtml(c.name)}</button>`).join("");
+  $("categoryCards").innerHTML = categories.length ? categories.map(c=>{
+    const icon=categoryIcons.find(([pattern])=>pattern.test(c.name))?.[1]||"🧺";
+    const count=products.filter(p=>Number(p.category_id)===Number(c.id)).length;
+    return `<button class="category-tile" data-category-card="${c.id}"><span class="category-tile-icon">${icon}</span><b>${escapeHtml(c.name)}</b><small>${count} Products · देखें →</small></button>`;
+  }).join("") : '<div class="category-empty">अभी Categories नहीं हैं। Admin Panel में Category जोड़ें; वह यहाँ अपने आप दिखेगी।</div>';
 }
+function chooseCategory(value){activeCategory=String(value);document.querySelectorAll(".category").forEach(x=>x.classList.toggle("active",x.dataset.category===activeCategory));renderProducts();}
 function addToCart(id){
   const p=products.find(x=>Number(x.id)===Number(id)); if(!p)return;
   const line=cart.find(x=>Number(x.id)===Number(id));
@@ -51,7 +60,7 @@ function renderCart(){
 }
 function toggleCart(open){$("cartDrawer").classList.toggle("open",open);$("drawerBackdrop").classList.toggle("open",open);}
 async function loadStore(){
-  try{const d=await api("/api/store");const s=d.store||{};if(s.store_name){$("storeName").textContent=s.store_name;document.title=s.store_name+" | Cold Drinks";}if(s.address)$("storeAddress").textContent=s.address;if(s.phone)$("callStore").href="tel:"+s.phone;if(s.phone)$("callStore").textContent="☎ "+s.phone;}
+  try{const d=await api("/api/store");const s=d.store||{},name=s.store_name==="SY Cold Drinks"?"SY Market":s.store_name||"SY Market";$("storeName").textContent=name;document.title=name+" | Online Shopping";if(s.address)$("storeAddress").textContent=s.address;if(s.phone)$("callStore").href="tel:"+s.phone;if(s.phone)$("callStore").textContent="☎ "+s.phone;}
   catch(e){console.warn("Store settings unavailable",e);}
 }
 async function loadCatalog(){
@@ -59,8 +68,11 @@ async function loadCatalog(){
   catch(e){$("productGrid").innerHTML='<div class="empty-products">Products अभी लोड नहीं हो पाए। कृपया थोड़ी देर बाद Refresh करें।</div>';console.error(e);}
 }
 $("productGrid").addEventListener("click",e=>{const b=e.target.closest("[data-add]");if(b)addToCart(b.dataset.add);});
-$("categories").addEventListener("click",e=>{const b=e.target.closest("[data-category]");if(!b)return;activeCategory=b.dataset.category;document.querySelectorAll(".category").forEach(x=>x.classList.toggle("active",x===b));renderProducts();});
+$("categories").addEventListener("click",e=>{const b=e.target.closest("[data-category]");if(b)chooseCategory(b.dataset.category);});
+$("categoryCards").addEventListener("click",e=>{const b=e.target.closest("[data-category-card]");if(!b)return;chooseCategory(b.dataset.categoryCard);$("products").scrollIntoView({behavior:"smooth"});});
 $("searchInput").addEventListener("input",renderProducts);
+$("heroSearchInput").addEventListener("input",e=>{$("searchInput").value=e.target.value;renderProducts();});
+$("sortProducts").addEventListener("change",renderProducts);
 $("openCart").onclick=()=>toggleCart(true);$("closeCart").onclick=()=>toggleCart(false);$("drawerBackdrop").onclick=()=>toggleCart(false);
 $("cartItems").addEventListener("click",e=>{const b=e.target.closest("[data-qty]");if(!b)return;const x=cart.find(i=>String(i.id)===b.dataset.qty);if(!x)return;x.qty+=Number(b.dataset.delta);if(x.qty<=0)cart=cart.filter(i=>i!==x);saveCart();});
 $("checkoutBtn").onclick=()=>{
