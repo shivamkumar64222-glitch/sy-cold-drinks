@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72" role="img" aria-labelledby="title">
+  <title id="title">SY Market logo</title>
+  <defs><linearGradient id="market" x1="8" y1="8" x2="64" y2="64" gradientUnits="userSpaceOnUse"><stop stop-color="#26b5a2"/><stop offset="1" stop-color="#126184"/></linearGradient></defs>
+  <rect x="3" y="3" width="66" height="66" rx="21" fill="url(#market)"/>
+  <circle cx="57" cy="15" r="5" fill="#ffb84d"/>
+  <path d="M24 30v-6a12 12 0 0 1 24 0v6" fill="none" stroke="#fff" stroke-linecap="round" stroke-width="4"/>
+  <path d="M18 29h36l-3 28H21l-3-28Z" fill="#fff"/><path d="M22 51h28l-1 6H21l1-6Z" fill="#e5f6f2"/>
+  <text x="36" y="46" fill="#147b76" font-family="Arial,sans-serif" font-size="15" font-weight="800" text-anchor="middle">SY</text>
+</svg>
