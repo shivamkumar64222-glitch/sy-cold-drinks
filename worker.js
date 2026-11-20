@@ -1,178 +1,21 @@
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Admin-Setup-Token",
-  "Access-Control-Max-Age": "86400"
-};
-const json = (data, status=200) => new Response(JSON.stringify(data), {
-  status, headers: {...CORS,"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store"}
-});
-const fail = (message,status=400) => json({success:false,message},status);
-const now = () => Math.floor(Date.now()/1000);
-const enc = new TextEncoder();
-const b64u = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
-const unb64u = s => Uint8Array.from(atob(s.replace(/-/g,"+").replace(/_/g,"/")+"===".slice((s.length+3)%4)),c=>c.charCodeAt(0));
-async function derive(password,salt){
- const key=await crypto.subtle.importKey("raw",enc.encode(password),"PBKDF2",false,["deriveBits"]);
- return b64u(await crypto.subtle.deriveBits({name:"PBKDF2",salt,iterations:210000,hash:"SHA-256"},key,256));
-}
-async function sign(value,secret){
- const key=await crypto.subtle.importKey("raw",enc.encode(secret),{name:"HMAC",hash:"SHA-256"},false,["sign"]);
- return b64u(await crypto.subtle.sign("HMAC",key,enc.encode(value)));
-}
-async function makeToken(admin,secret){
- const payload=b64u(enc.encode(JSON.stringify({sub:admin.id,email:admin.email,exp:now()+86400})));
- return payload+"."+await sign(payload,secret);
-}
-async function verifyToken(request,env){
- const token=(request.headers.get("Authorization")||"").replace(/^Bearer\s+/i,"");
- const [payload,signature]=token.split(".");
- if(!payload||!signature||!env.SESSION_SECRET)return null;
- if(await sign(payload,env.SESSION_SECRET)!==signature)return null;
- try{const data=JSON.parse(new TextDecoder().decode(unb64u(payload)));if(data.exp<now())return null;
- const admin=await env.DB.prepare("SELECT id,email,is_active FROM admin_users WHERE id=?").bind(data.sub).first();
- return admin&&admin.is_active?admin:null;}catch{return null;}
-}
-const safeProduct = p => ({
- id:p.id,category_id:p.category_id,name:p.name,slug:p.slug,brand:p.brand,
- description:p.description,size_label:p.size_label,mrp:p.mrp,selling_price:p.selling_price,
- stock_quantity:p.stock_quantity,image_url:p.image_url,is_chilled:p.is_chilled,is_available:p.is_available
-});
-function slugify(s){return String(s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,80)||"product";}
-async function body(request){try{return await request.json();}catch{return null;}}
-export default {
- async fetch(request,env){
-  const url=new URL(request.url),path=url.pathname,method=request.method;
-  if(method==="OPTIONS")return new Response(null,{headers:CORS});
-  try{
-   if(path==="/api/health"&&method==="GET"){
-    const r=await env.DB.prepare("SELECT COUNT(*) AS count FROM products").first();
-    return json({success:true,database:"Connected",products:r.count});
-   }
-   if(path==="/api/store"&&method==="GET"){
-    const rows=await env.DB.prepare("SELECT setting_key,setting_value FROM store_settings").all();
-    const store=Object.fromEntries((rows.results||[]).map(x=>[x.setting_key,x.setting_value]));
-    return json({success:true,store});
-   }
-   if(path==="/api/categories"&&method==="GET"){
-    const r=await env.DB.prepare("SELECT id,name,slug,description,sort_order FROM categories WHERE is_active=1 ORDER BY sort_order,name").all();
-    return json({success:true,categories:r.results||[]});
-   }
-   if(path==="/api/products"&&method==="GET"){
-    const r=await env.DB.prepare("SELECT * FROM products WHERE is_available=1 AND stock_quantity>0 ORDER BY name").all();
-    return json({success:true,products:(r.results||[]).map(safeProduct)});
-   }
-   if(path==="/api/admin/setup"&&method==="POST"){
-    if(!env.ADMIN_SETUP_TOKEN)return fail("Admin setup token is not configured",503);
-    const token=request.headers.get("X-Admin-Setup-Token")||"";
-    if(token.length<24||token!==env.ADMIN_SETUP_TOKEN)return fail("Invalid setup token",401);
-    const count=await env.DB.prepare("SELECT COUNT(*) AS n FROM admin_users").first();
-    if(count.n>0)return fail("Admin account already initialized",409);
-    const b=await body(request);
-    if(!b||typeof b.email!=="string"||!/^\S+@\S+\.\S+$/.test(b.email)||typeof b.password!=="string"||b.password.length<12)return fail("Valid email and password (at least 12 characters) are required");
-    const salt=crypto.getRandomValues(new Uint8Array(16)),hash=await derive(b.password,salt);
-    const passwordHash="pbkdf2$210000$"+b64u(salt)+"$"+hash;
-    const result=await env.DB.prepare("INSERT INTO admin_users(email,password_hash,is_active) VALUES(?,?,1)").bind(b.email.toLowerCase(),passwordHash).run();
-    return json({success:true,message:"Admin account created. Remove ADMIN_SETUP_TOKEN secret after setup.",admin_id:result.meta.last_row_id},201);
-   }
-   if(path==="/api/admin/login"&&method==="POST"){
-    const b=await body(request);if(!b||typeof b.email!=="string"||typeof b.password!=="string")return fail("Email and password required");
-    const admin=await env.DB.prepare("SELECT * FROM admin_users WHERE email=? AND is_active=1").bind(b.email.toLowerCase()).first();
-    if(!admin)return fail("Invalid email or password",401);
-    const parts=String(admin.password_hash).split("$");
-    if(parts.length!==4||parts[0]!=="pbkdf2")return fail("Admin password format invalid; reset setup required",401);
-    const actual=await derive(b.password,unb64u(parts[2]));
-    if(actual!==parts[3])return fail("Invalid email or password",401);
-    return json({success:true,token:await makeToken(admin,env.SESSION_SECRET),admin:{id:admin.id,email:admin.email}});
-   }
-   if(path.startsWith("/api/admin/")){
-    const admin=await verifyToken(request,env);if(!admin)return fail("Unauthorized",401);
-    if(path==="/api/admin/me"&&method==="GET")return json({success:true,admin:{id:admin.id,email:admin.email}});
-    if(path==="/api/admin/logout"&&method==="POST")return json({success:true});
-    if(path==="/api/admin/products"&&method==="GET"){
-     const r=await env.DB.prepare("SELECT * FROM products ORDER BY created_at DESC").all();
-     return json({success:true,products:(r.results||[]).map(safeProduct)});
-    }
-    if(path==="/api/admin/products"&&method==="POST"){
-     const b=await body(request);if(!b||typeof b.name!=="string"||!b.name.trim())return fail("Product name required");
-     const mrp=Number(b.mrp),price=Number(b.selling_price),stock=Number(b.stock_quantity);
-     if(![mrp,price,stock].every(Number.isSafeInteger)||mrp<0||price<0||price>mrp||stock<0)return fail("Invalid price or stock");
-     if(b.category_id!=null&&!Number.isSafeInteger(Number(b.category_id)))return fail("Invalid category");
-     const slug=slugify(b.slug||b.name)+"-"+crypto.randomUUID().slice(0,6);
-     const r=await env.DB.prepare("INSERT INTO products(category_id,name,slug,brand,description,size_label,mrp,selling_price,stock_quantity,image_url,is_chilled,is_available) VALUES(?,?,?,?,?,?,?,?,?,?,?,1)")
-      .bind(b.category_id?Number(b.category_id):null,b.name.trim(),slug,b.brand||null,b.description||null,b.size_label||null,mrp,price,stock,b.image_url||null,b.is_chilled?1:0).run();
-     return json({success:true,id:r.meta.last_row_id,message:"Product added"},201);
-    }
-    const productMatch=path.match(/^\/api\/admin\/products\/(\d+)$/);
-    if(productMatch&&method==="PATCH"){
-     const id=Number(productMatch[1]),b=await body(request);if(!b||typeof b!=="object")return fail("Invalid product data");
-     const allowed=["category_id","name","brand","description","size_label","mrp","selling_price","stock_quantity","image_url","is_chilled","is_available"];
-     const fields=[],values=[];
-     for(const key of allowed)if(Object.hasOwn(b,key)){
-      let v=b[key];
-      if(["mrp","selling_price","stock_quantity","category_id"].includes(key)&&v!==null){v=Number(v);if(!Number.isSafeInteger(v)||v<0)return fail("Invalid "+key);}
-      if(key==="name"&&(!String(v).trim()||String(v).length>160))return fail("Invalid product name");
-      if(["is_chilled","is_available"].includes(key)){if(![true,false,0,1].includes(v))return fail("Invalid "+key);v=v?1:0;}
-      if(["brand","description","size_label","image_url","category_id"].includes(key)&&v==="")v=null;
-      fields.push(key+"=?");values.push(v);
-     }
-     if(!fields.length)return fail("No fields to update");
-     const current=await env.DB.prepare("SELECT mrp,selling_price FROM products WHERE id=?").bind(id).first();if(!current)return fail("Product not found",404);
-     const nextMrp=b.mrp===undefined?current.mrp:Number(b.mrp),nextPrice=b.selling_price===undefined?current.selling_price:Number(b.selling_price);
-     if(nextPrice>nextMrp)return fail("Selling price cannot exceed MRP");
-     values.push(id);await env.DB.prepare("UPDATE products SET "+fields.join(",")+",updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(...values).run();
-     return json({success:true,message:"Product updated"});
-    }
-    if(productMatch&&method==="DELETE"){
-     const id=Number(productMatch[1]);
-     const used=await env.DB.prepare("SELECT COUNT(*) AS n FROM order_items WHERE product_id=?").bind(id).first();
-     if(used.n>0){await env.DB.prepare("UPDATE products SET is_available=0,stock_quantity=0,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(id).run();}
-     else await env.DB.prepare("DELETE FROM products WHERE id=?").bind(id).run();
-     return json({success:true,message:"Product removed"});
-    }
-    return fail("Admin route not found",404);
-   }
-   if(path==="/api/orders"&&method==="POST"){
-    const b=await body(request);
-    if(!b||typeof b.customer_name!=="string"&&typeof b.name!=="string")return fail("Customer name required");
-    const name=String(b.customer_name||b.name).trim(),phone=String(b.customer_phone||b.phone||"").trim();
-    if(!name||!/^[6-9]\d{9}$/.test(phone))return fail("Valid name and 10-digit phone required");
-    const type=b.order_type==="pickup"?"pickup":"delivery";
-    const address=String(b.address||"").trim();
-    const items=Array.isArray(b.items)?b.items:[];
-    if(!items.length||items.length>30)return fail("Cart is empty or too large");
-    const settingsRows=await env.DB.prepare("SELECT setting_key,setting_value FROM store_settings").all();
-    const settings=Object.fromEntries((settingsRows.results||[]).map(x=>[x.setting_key,x.setting_value]));
-    const min=Number(settings.minimum_order??100),fee=type==="pickup"?0:Number(settings.delivery_charge??20);
-    let subtotal=0,validated=[];
-    for(const item of items){
-     const id=Number(item.product_id),qty=Number(item.quantity);
-     if(!Number.isSafeInteger(id)||!Number.isSafeInteger(qty)||qty<1||qty>50)return fail("Invalid cart item");
-     const p=await env.DB.prepare("SELECT id,name,size_label,selling_price,stock_quantity,is_available FROM products WHERE id=?").bind(id).first();
-     if(!p||!p.is_available||p.stock_quantity<qty)return fail("Stock unavailable for "+(p?.name||"a product"),409);
-     subtotal+=p.selling_price*qty;if(!Number.isSafeInteger(subtotal))return fail("Order total too large");
-     validated.push({...p,qty,line:p.selling_price*qty});
-    }
-    if(type==="delivery"&&subtotal<min)return fail("Minimum home delivery order is ₹"+min);
-    if(type==="delivery"&&!address)return fail("Delivery address required");
-    const total=subtotal+fee,orderNumber="SY"+Date.now().toString().slice(-9);
-    let customer=await env.DB.prepare("SELECT id FROM customers WHERE phone=? ORDER BY id LIMIT 1").bind(phone).first();
-    if(customer) await env.DB.prepare("UPDATE customers SET name=? WHERE id=?").bind(name,customer.id).run();
-    else {
-     const created=await env.DB.prepare("INSERT INTO customers(name,phone) VALUES(?,?)").bind(name,phone).run();
-     customer={id:created.meta.last_row_id};
-    }
-    const result=await env.DB.prepare("INSERT INTO orders(order_number,customer_id,customer_name,customer_phone,order_type,payment_method,status,subtotal,delivery_fee,total_amount,address,landmark,notes) VALUES(?,?,?,?,?,'cod','pending',?,?,?,?,?,?)")
-      .bind(orderNumber,customer.id,name,phone,type,subtotal,fee,total,address||null,b.landmark||null,b.notes||null).run();
-    const orderId=result.meta.last_row_id;
-    for(const p of validated){
-     const stock=await env.DB.prepare("UPDATE products SET stock_quantity=stock_quantity-?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND stock_quantity>=?").bind(p.qty,p.id,p.qty).run();
-     if(stock.meta.changes!==1)return fail("Stock changed while placing order. Please retry.",409);
-     await env.DB.prepare("INSERT INTO order_items(order_id,product_id,product_name,size_label,unit_price,quantity,line_total) VALUES(?,?,?,?,?,?,?)").bind(orderId,p.id,p.name,p.size_label,p.selling_price,p.qty,p.line).run();
-    }
-    return json({success:true,order_number:orderNumber,total_amount:total,message:"Order received"},201);
-   }
-   return fail("API route not found",404);
-  }catch(error){console.error("Worker error",error);return fail("Internal server error",500);}
- }
-};
+const e=new TextEncoder(),d=new TextDecoder(),statuses=['pending','confirmed','preparing','out_for_delivery','ready_for_pickup','completed','cancelled'];
+const b64=x=>btoa(String.fromCharCode(...new Uint8Array(x))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');const ub=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')+'==='.slice((s.length+3)%4)),x=>x.charCodeAt(0));
+const trim=x=>typeof x==='string'?x.trim():'';const slug=x=>trim(x).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,60)||'item';
+const H=env=>({'Content-Type':'application/json','Cache-Control':'no-store','Access-Control-Allow-Origin':env.ALLOWED_ORIGIN||'*','Access-Control-Allow-Methods':'GET,POST,PATCH,DELETE,OPTIONS','Access-Control-Allow-Headers':'Content-Type,Authorization,X-Admin-Setup-Token,Idempotency-Key'});const J=(env,x,s=200)=>new Response(JSON.stringify(x),{status:s,headers:H(env)});const F=(env,message,s=400)=>J(env,{success:false,message},s);async function body(r){if(Number(r.headers.get('content-length')||0)>20000)return null;try{return await r.json()}catch{return null}}
+const PBKDF2_ITERATIONS=100000;
+async function sign(x,s){const k=await crypto.subtle.importKey('raw',e.encode(s),{name:'HMAC',hash:'SHA-256'},false,['sign']);return b64(await crypto.subtle.sign('HMAC',k,e.encode(x)))}async function pw(x,s){const k=await crypto.subtle.importKey('raw',e.encode(x),'PBKDF2',false,['deriveBits']);return b64(await crypto.subtle.deriveBits({name:'PBKDF2',salt:s,iterations:PBKDF2_ITERATIONS,hash:'SHA-256'},k,256))}
+async function user(r,env){const [p,s]=(r.headers.get('authorization')||'').replace(/^Bearer /i,'').split('.');if(!p||!s||!env.SESSION_SECRET||await sign(p,env.SESSION_SECRET)!==s)return null;try{const x=JSON.parse(d.decode(ub(p)));if(x.exp<Date.now()/1000)return null;return await env.DB.prepare('SELECT id,email FROM admin_users WHERE id=? AND is_active=1').bind(x.sub).first()}catch{return null}}async function settings(db){const x=await db.prepare('SELECT setting_key,setting_value FROM store_settings').all();return Object.fromEntries((x.results||[]).map(r=>[r.setting_key,r.setting_value]))}const prod=p=>p&&({id:p.id,category_id:p.category_id,name:p.name,slug:p.slug,brand:p.brand,description:p.description,size_label:p.size_label,mrp:p.mrp,selling_price:p.selling_price,stock_quantity:p.stock_quantity,image_url:p.image_url,is_chilled:p.is_chilled,is_available:p.is_available});
+function productCheck(x){for(const k of ['mrp','selling_price','stock_quantity'])x[k]=Number(x[k]);if(!trim(x.name)||!['mrp','selling_price','stock_quantity'].every(k=>Number.isSafeInteger(x[k])&&x[k]>=0)||x.selling_price>x.mrp)return 'Invalid product data';if(x.image_url&&(!/^https:\/\//.test(x.image_url)||x.image_url.length>1000))return 'Image URL must be HTTPS';return null}
+export default {async fetch(r,env){const u=new URL(r.url),p=u.pathname,m=r.method;if(m==='OPTIONS')return new Response(null,{headers:H(env)});if(m!=='GET'&&env.ALLOWED_ORIGIN&&r.headers.get('origin')!==env.ALLOWED_ORIGIN)return F(env,'Origin not allowed',403);try{
+if(p==='/api/health'&&m==='GET'){let x=await env.DB.prepare('SELECT COUNT(*) count FROM products').first();return J(env,{success:true,database:'connected',products:x.count})}if(p==='/api/store'&&m==='GET')return J(env,{success:true,store:await settings(env.DB)});if(p==='/api/categories'&&m==='GET'){let x=await env.DB.prepare('SELECT id,name,slug,description,sort_order FROM categories WHERE is_active=1 ORDER BY sort_order,name').all();return J(env,{success:true,categories:x.results||[]})}if(p==='/api/products'&&m==='GET'){let x=await env.DB.prepare('SELECT * FROM products WHERE is_available=1 AND stock_quantity>0 ORDER BY name').all();return J(env,{success:true,products:(x.results||[]).map(prod)})}
+if(p==='/api/admin/setup'&&m==='POST'){if(!env.ADMIN_SETUP_TOKEN||r.headers.get('X-Admin-Setup-Token')!==env.ADMIN_SETUP_TOKEN)return F(env,'Invalid setup token',401);if((await env.DB.prepare('SELECT COUNT(*) n FROM admin_users').first()).n)return F(env,'Admin account already initialized',409);let x=await body(r),email=trim(x?.email).toLowerCase();if(!/^\S+@\S+\.\S+$/.test(email)||typeof x?.password!=='string'||x.password.length<12)return F(env,'Valid email and 12-character password required');let salt=crypto.getRandomValues(new Uint8Array(16));await env.DB.prepare('INSERT INTO admin_users(email,password_hash) VALUES(?,?)').bind(email,'pbkdf2$'+PBKDF2_ITERATIONS+'$'+b64(salt)+'$'+await pw(x.password,salt)).run();return J(env,{success:true,message:'Admin created. Remove setup secret.'},201)}
+if(p==='/api/admin/login'&&m==='POST'){let x=await body(r),a=await env.DB.prepare('SELECT * FROM admin_users WHERE email=? AND is_active=1').bind(trim(x?.email).toLowerCase()).first();if(!a||typeof x?.password!=='string')return F(env,'Invalid email or password',401);let q=a.password_hash.split('$');if(q.length!==4||await pw(x.password,ub(q[2]))!==q[3])return F(env,'Invalid email or password',401);let v=b64(e.encode(JSON.stringify({sub:a.id,exp:Math.floor(Date.now()/1000)+28800})));return J(env,{success:true,token:v+'.'+await sign(v,env.SESSION_SECRET),admin:{id:a.id,email:a.email}})}
+if(p==='/api/orders'&&m==='POST')return order(r,env);if(!p.startsWith('/api/admin/'))return F(env,'Not found',404);if(!await user(r,env))return F(env,'Unauthorized',401);
+if(p==='/api/admin/me')return J(env,{success:true});if(p==='/api/admin/products'&&m==='GET'){let x=await env.DB.prepare('SELECT * FROM products ORDER BY created_at DESC').all();return J(env,{success:true,products:(x.results||[]).map(prod)})}if(p==='/api/admin/products'&&m==='POST'){let x=await body(r)||{},z=productCheck(x);if(z)return F(env,z);let n=trim(x.name),q=await env.DB.prepare('INSERT INTO products(category_id,name,slug,brand,description,size_label,mrp,selling_price,stock_quantity,image_url,is_chilled,is_available) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').bind(x.category_id?Number(x.category_id):null,n,slug(n)+'-'+crypto.randomUUID().slice(0,6),trim(x.brand)||null,trim(x.description)||null,trim(x.size_label)||null,x.mrp,x.selling_price,x.stock_quantity,trim(x.image_url)||null,x.is_chilled?1:0,x.is_available===false?0:1).run();return J(env,{success:true,id:q.meta.last_row_id},201)}
+let z=p.match(/^\/api\/admin\/products\/(\d+)$/);if(z){let id=Number(z[1]);if(m==='DELETE'){let used=await env.DB.prepare('SELECT 1 FROM order_items WHERE product_id=?').bind(id).first();await env.DB.prepare(used?'UPDATE products SET is_available=0,stock_quantity=0 WHERE id=?':'DELETE FROM products WHERE id=?').bind(id).run();return J(env,{success:true})}if(m==='PATCH'){let old=await env.DB.prepare('SELECT * FROM products WHERE id=?').bind(id).first(),x={...old,...await body(r)},err=productCheck(x);if(!old)return F(env,'Not found',404);if(err)return F(env,err);await env.DB.prepare('UPDATE products SET category_id=?,name=?,brand=?,description=?,size_label=?,mrp=?,selling_price=?,stock_quantity=?,image_url=?,is_chilled=?,is_available=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(x.category_id||null,trim(x.name),trim(x.brand)||null,trim(x.description)||null,trim(x.size_label)||null,x.mrp,x.selling_price,x.stock_quantity,trim(x.image_url)||null,x.is_chilled?1:0,x.is_available?1:0,id).run();return J(env,{success:true})}}
+if(p==='/api/admin/categories'&&m==='GET'){let x=await env.DB.prepare('SELECT * FROM categories ORDER BY sort_order,name').all();return J(env,{success:true,categories:x.results||[]})}if(p==='/api/admin/categories'&&m==='POST'){let x=await body(r)||{},n=trim(x.name);if(!n)return F(env,'Category name required');let q=await env.DB.prepare('INSERT INTO categories(name,slug,description,sort_order,is_active) VALUES(?,?,?,?,?)').bind(n,slug(n)+'-'+crypto.randomUUID().slice(0,5),trim(x.description)||null,Number(x.sort_order)||0,x.is_active===false?0:1).run();return J(env,{success:true,id:q.meta.last_row_id},201)}
+z=p.match(/^\/api\/admin\/categories\/(\d+)$/);if(z&&m==='PATCH'){let o=await env.DB.prepare('SELECT * FROM categories WHERE id=?').bind(z[1]).first(),x={...o,...await body(r)},n=trim(x.name);if(!o||!n)return F(env,'Category not found',404);await env.DB.prepare('UPDATE categories SET name=?,description=?,sort_order=?,is_active=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(n,trim(x.description)||null,Number(x.sort_order)||0,x.is_active?1:0,z[1]).run();return J(env,{success:true})}
+if(p==='/api/admin/settings'){if(m==='GET')return J(env,{success:true,settings:await settings(env.DB)});if(m==='PATCH'){let x=await body(r)||{},keys=['store_name','phone','address','delivery_charge','minimum_order','delivery_radius_km','business_hours','is_accepting_orders'],q=[];for(let k of keys)if(Object.hasOwn(x,k))q.push(env.DB.prepare('INSERT INTO store_settings(setting_key,setting_value,updated_at) VALUES(?,?,CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_at=CURRENT_TIMESTAMP').bind(k,trim(String(x[k]))));if(!q.length)return F(env,'No settings');await env.DB.batch(q);return J(env,{success:true})}}
+if(p==='/api/admin/orders'&&m==='GET'){let st=u.searchParams.get('status'),a=statuses.includes(st)?[st]:[],w=a.length?'WHERE status=?':'',x=await env.DB.prepare(`SELECT * FROM orders ${w} ORDER BY created_at DESC LIMIT 100`).bind(...a).all();return J(env,{success:true,orders:x.results||[]})}z=p.match(/^\/api\/admin\/orders\/(\d+)$/);if(z&&m==='PATCH'){let x=await body(r);if(!statuses.includes(x?.status))return F(env,'Invalid status');await env.DB.prepare('UPDATE orders SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(x.status,z[1]).run();return J(env,{success:true})}return F(env,'Not found',404)}catch(x){console.error(x);return F(env,'Internal server error',500)}}};
+async function order(r,env){let x=await body(r)||{},name=trim(x.name),phone=trim(x.phone),key=r.headers.get('Idempotency-Key')||'',items=Array.isArray(x.items)?x.items:[],type=x.order_type==='pickup'?'pickup':'delivery';if(!name||!/^[6-9]\d{9}$/.test(phone)||key.length<16||!items.length)return F(env,'Invalid order');let previous=await env.DB.prepare('SELECT order_number,total_amount FROM orders WHERE request_token=?').bind(key).first();if(previous)return J(env,{success:true,...previous,replayed:true});let cfg=await settings(env.DB);if(cfg.is_accepting_orders==='false')return F(env,'Store closed',503);let quantities=new Map();for(let i of items){let id=Number(i.product_id),q=Number(i.quantity);if(!Number.isInteger(id)||!Number.isInteger(q)||q<1||q>50)return F(env,'Invalid cart');quantities.set(id,(quantities.get(id)||0)+q)}let ids=[...quantities.keys()],found=await env.DB.prepare(`SELECT * FROM products WHERE id IN (${ids.map(()=>'?')})`).bind(...ids).all();if(found.results.length!==ids.length)return F(env,'Product unavailable',409);let subtotal=0;for(let p of found.results){let q=quantities.get(p.id);if(!p.is_available||p.stock_quantity<q)return F(env,'Stock unavailable',409);subtotal+=p.selling_price*q}if(type==='delivery'&&(!trim(x.address)||subtotal<Number(cfg.minimum_order||100)))return F(env,'Delivery address or minimum order required');let fee=type==='pickup'?0:Number(cfg.delivery_charge||20),num='SY'+Date.now().toString().slice(-9),customer=await env.DB.prepare('SELECT id FROM customers WHERE phone=?').bind(phone).first(),q=[env.DB.prepare('INSERT INTO orders(order_number,request_token,customer_id,customer_name,customer_phone,order_type,status,subtotal,delivery_fee,total_amount,address,landmark,notes) VALUES(?,?,?,?,?,?,\'pending\',?,?,?,?,?,?)').bind(num,key,customer?.id||null,name,phone,type,subtotal,fee,subtotal+fee,trim(x.address)||null,trim(x.landmark)||null,trim(x.notes)||null)];for(let p of found.results)q.push(env.DB.prepare('UPDATE products SET stock_quantity=stock_quantity-? WHERE id=? AND stock_quantity>=?').bind(quantities.get(p.id),p.id,quantities.get(p.id)));await env.DB.batch(q);let o=await env.DB.prepare('SELECT id FROM orders WHERE request_token=?').bind(key).first();await env.DB.batch(found.results.map(p=>env.DB.prepare('INSERT INTO order_items(order_id,product_id,product_name,size_label,unit_price,quantity,line_total) VALUES(?,?,?,?,?,?,?)').bind(o.id,p.id,p.name,p.size_label,p.selling_price,quantities.get(p.id),p.selling_price*quantities.get(p.id))));return J(env,{success:true,order_number:num,total_amount:subtotal+fee},201)}
+
