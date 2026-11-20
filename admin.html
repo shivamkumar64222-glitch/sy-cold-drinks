@@ -6,6 +6,11 @@
   <section class="admin-card" id="loginCard"><h1>Admin Login</h1><p>दुकान के Products और Stock को Manage करें।</p>
     <form id="loginForm"><label>Email<input name="email" type="email" required autocomplete="username"></label><label>Password<input name="password" type="password" required autocomplete="current-password"></label><button class="primary-btn full-btn">Login करें →</button><p class="form-message" id="loginMessage"></p></form>
   </section>
+  <section class="admin-card" id="setupCard">
+    <h1>पहली बार Admin Setup</h1><p>केवल पहली बार Admin account बनाने के लिए। Cloudflare में सेट किया गया ADMIN_SETUP_TOKEN यहाँ डालें।</p>
+    <form id="setupForm"><label>Setup Token<input name="setup_token" type="password" required autocomplete="off"></label><label>Admin Email<input name="email" type="email" required></label><label>नया Password (कम-से-कम 12 अक्षर)<input name="password" type="password" minlength="12" required autocomplete="new-password"></label><button class="primary-btn full-btn">Admin Account बनाएँ</button><p class="form-message" id="setupMessage"></p></form>
+  </section>
+  <p style="text-align:center"><button class="outline-btn" id="showSetup">पहली बार Admin Setup</button></p>
   <section id="dashboard" class="hidden">
     <div class="admin-top"><div><span class="eyebrow">CONTROL CENTER</span><h1>Products Dashboard</h1></div><button class="outline-btn" id="logoutBtn">Logout</button></div>
     <div class="admin-panel"><h2 id="productFormTitle">नया Product जोड़ें</h2><form id="productForm">
