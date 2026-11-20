@@ -4,6 +4,14 @@ let products = [], categories = [], activeCategory = "all";
 let cart = JSON.parse(localStorage.getItem("sycd-cart") || "[]");
 const $ = id => document.getElementById(id);
 const saveCart = () => { localStorage.setItem("sycd-cart", JSON.stringify(cart)); renderCart(); };
+function customerToken(){
+  let token=localStorage.getItem("sycd-customer-token");
+  if(!/^[a-f0-9]{64}$/i.test(token||"")){
+    token=Array.from(crypto.getRandomValues(new Uint8Array(32)),b=>b.toString(16).padStart(2,"0")).join("");
+    localStorage.setItem("sycd-customer-token",token);
+  }
+  return token;
+}
 async function api(path, options={}) {
   const response = await fetch(API_BASE + path, { ...options, headers: { "Content-Type":"application/json", ...(options.headers||{}) } });
   const data = await response.json().catch(()=>({success:false,message:"Invalid API response"}));
@@ -69,7 +77,7 @@ $("checkoutForm").onsubmit=async e=>{
   payload.items=cart.map(x=>({product_id:x.id,quantity:x.qty}));payload.payment_method="cod";
   try{
     const requestToken=crypto.randomUUID();
-    const result=await api("/api/orders",{method:"POST",headers:{"Idempotency-Key":requestToken},body:JSON.stringify(payload)});
+    const result=await api("/api/orders",{method:"POST",headers:{"Idempotency-Key":requestToken,"X-Customer-Token":customerToken()},body:JSON.stringify(payload)});
     message.textContent="ऑर्डर सफल! Order No: "+(result.order_number||result.order?.order_number||"Confirmed");
     cart=[];saveCart();form.reset();
   }catch(err){message.textContent="ऑर्डर अभी ऑनलाइन जमा नहीं हो सका: "+err.message+"। कृपया दुकान पर फोन करें।";console.error(err);}
