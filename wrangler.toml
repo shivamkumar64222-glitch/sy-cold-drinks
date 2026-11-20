@@ -1,0 +1,8 @@
+name = "sy-cold-drinks"
+main = "worker.js"
+compatibility_date = "2026-11-20"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sy-cold-drinks-db"
+database_id = "3fe479c9-adcb-4b08-ad02-d77adc31aa8c"
