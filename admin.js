@@ -1,4 +1,4 @@
-const API_BASE="https://sy-cold-drinks-a.shivam65838.workers.dev";
+const API_BASE="https://sy-cold-drink.shivam65838.workers.dev";
 const $=id=>document.getElementById(id);let token=sessionStorage.getItem("sycd-admin-token")||"",items=[],editingId=null;
 async function api(path,options={}){
  const r=await fetch(API_BASE+path,{...options,headers:{"Content-Type":"application/json",...(token?{Authorization:"Bearer "+token}:{}),...(options.headers||{})}});
