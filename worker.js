@@ -45,7 +45,7 @@ async function order(r,env){
   let subtotal=0;
   for(const p of found.results){const q=quantities.get(p.id);if(!p.is_available||p.stock_quantity<q)return F(env,'Stock unavailable',409);subtotal+=p.selling_price*q}
   if(type==='delivery'&&(!trim(x.address)||subtotal<Number(cfg.minimum_order||100)))return F(env,'Delivery address or minimum order required');
-  await env.DB.prepare('INSERT INTO customers(name,phone) VALUES(?,?) ON CONFLICT(phone) DO UPDATE SET name=excluded.name,updated_at=CURRENT_TIMESTAMP').bind(name,phone).run();
+  await env.DB.prepare('INSERT INTO customers(name,phone) VALUES(?,?) ON CONFLICT(phone) DO UPDATE SET name=excluded.name').bind(name,phone).run();
   const customer=await env.DB.prepare('SELECT id FROM customers WHERE phone=?').bind(phone).first();
   if(!customer)return F(env,'Customer record could not be saved',500);
   const fee=type==='pickup'?0:Number(cfg.delivery_charge||20),num='SY'+Date.now().toString().slice(-9),statements=[env.DB.prepare('INSERT INTO orders(order_number,request_token,customer_id,customer_name,customer_phone,order_type,status,subtotal,delivery_fee,total_amount,address,landmark,notes) VALUES(?,?,?,?,?,?,\'pending\',?,?,?,?,?,?)').bind(num,key,customer.id,name,phone,type,subtotal,fee,subtotal+fee,trim(x.address)||null,trim(x.landmark)||null,trim(x.notes)||null)];
